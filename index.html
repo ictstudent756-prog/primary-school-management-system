@@ -1,0 +1,189 @@
+
+# school_mgmt.py
+# A simplified Django project in one file for demonstration.
+# In practice, Django projects are split into multiple files, but this combined version
+# makes it easy to paste into GitHub and understand the full flow.
+
+import os
+from django.conf import settings
+from django.core.management import execute_from_command_line
+from django.db import models
+from django.contrib.auth.models import User
+from django.http import HttpResponse
+from django.shortcuts import render
+from django.urls import path
+from django.contrib import admin
+from django.contrib.auth.decorators import login_required
+from reportlab.pdfgen import canvas
+
+# ----------------------------
+# Django Settings
+# ----------------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+settings.configure(
+    DEBUG=True,
+    SECRET_KEY="school-secret-key",
+    ROOT_URLCONF=__name__,
+    ALLOWED_HOSTS=["*"],
+    INSTALLED_APPS=[
+        "django.contrib.admin",
+        "django.contrib.auth",
+        "django.contrib.contenttypes",
+        "django.contrib.sessions",
+        "django.contrib.messages",
+        "django.contrib.staticfiles",
+    ],
+    MIDDLEWARE=[
+        "django.middleware.security.SecurityMiddleware",
+        "django.contrib.sessions.middleware.SessionMiddleware",
+        "django.middleware.common.CommonMiddleware",
+        "django.middleware.csrf.CsrfViewMiddleware",
+        "django.contrib.auth.middleware.AuthenticationMiddleware",
+        "django.contrib.messages.middleware.MessageMiddleware",
+    ],
+    TEMPLATES=[{
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [os.path.join(BASE_DIR, "templates")],
+        "APP_DIRS": True,
+        "OPTIONS": {"context_processors": [
+            "django.template.context_processors.debug",
+            "django.template.context_processors.request",
+            "django.contrib.auth.context_processors.auth",
+            "django.contrib.messages.context_processors.messages",
+        ]},
+    }],
+    STATIC_URL="/static/",
+    DATABASES={"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": os.path.join(BASE_DIR, "db.sqlite3")}},
+)
+
+# ----------------------------
+# Models
+# ----------------------------
+class Student(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    grade = models.CharField(max_length=10)
+    parent_contact = models.CharField(max_length=15)
+
+    def __str__(self):
+        return self.user.username
+
+class Teacher(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    subject = models.CharField(max_length=50)
+
+    def __str__(self):
+        return self.user.username
+
+class ReportCard(models.Model):
+    student = models.ForeignKey(Student, on_delete=models.CASCADE)
+    subject = models.CharField(max_length=50)
+    grade = models.CharField(max_length=2)
+    remarks = models.TextField()
+
+    def __str__(self):
+        return f"{self.student.user.username} - {self.subject}"
+
+# ----------------------------
+# Views
+# ----------------------------
+def is_teacher(user):
+    return hasattr(user, 'teacher')
+
+def is_student(user):
+    return hasattr(user, 'student')
+
+@login_required
+def dashboard(request):
+    if is_teacher(request.user):
+        return render(request, "teacher_dashboard.html")
+    elif is_student(request.user):
+        return render(request, "student_dashboard.html")
+    else:
+        return render(request, "admin_dashboard.html")
+
+@login_required
+def certificate(request, student_id):
+    student = Student.objects.get(id=student_id)
+    response = HttpResponse(content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{student.user.username}_certificate.pdf"'
+    p = canvas.Canvas(response)
+    p.drawString(100, 750, "Certificate of Completion")
+    p.drawString(100, 700, f"This certifies that {student.user.get_full_name()} has completed Grade {student.grade}.")
+    p.showPage()
+    p.save()
+    return response
+
+# ----------------------------
+# URL Configuration
+# ----------------------------
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('dashboard/', dashboard, name='dashboard'),
+    path('certificate/<int:student_id>/', certificate, name='certificate'),
+]
+
+# ----------------------------
+# Templates (inline for demo)
+# ----------------------------
+os.makedirs(os.path.join(BASE_DIR, "templates"), exist_ok=True)
+
+with open(os.path.join(BASE_DIR, "templates/base.html"), "w") as f:
+    f.write("""
+<!DOCTYPE html>
+<html>
+<head>
+  <title>School Management System</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+</head>
+<body>
+  <nav class="navbar navbar-dark bg-primary">
+    <a class="navbar-brand" href="#">School Dashboard</a>
+  </nav>
+  <div class="container mt-4">
+    {% block content %}{% endblock %}
+  </div>
+</body>
+</html>
+""")
+
+with open(os.path.join(BASE_DIR, "templates/teacher_dashboard.html"), "w") as f:
+    f.write("""
+{% extends "base.html" %}
+{% block content %}
+<h2>Teacher Dashboard</h2>
+<ul>
+  <li><a href="/reports">View Reports</a></li>
+  <li><a href="/attendance">Mark Attendance</a></li>
+</ul>
+{% endblock %}
+""")
+
+with open(os.path.join(BASE_DIR, "templates/student_dashboard.html"), "w") as f:
+    f.write("""
+{% extends "base.html" %}
+{% block content %}
+<h2>Student Dashboard</h2>
+<ul>
+  <li><a href="/my_reports">My Report Cards</a></li>
+  <li><a href="/certificate/1">Download Certificate</a></li>
+</ul>
+{% endblock %}
+""")
+
+with open(os.path.join(BASE_DIR, "templates/admin_dashboard.html"), "w") as f:
+    f.write("""
+{% extends "base.html" %}
+{% block content %}
+<h2>Admin Dashboard</h2>
+<ul>
+  <li><a href="/admin/core/student/">Manage Students</a></li>
+  <li><a href="/admin/core/teacher/">Manage Teachers</a></li>
+</ul>
+{% endblock %}
+""")
+
+# ----------------------------
+# Run
+# ----------------------------
+if __name__ == "__main__":
+    execute_from_command_line()
